@@ -42,7 +42,7 @@ export interface GitWatcherConfig {
 /**
  * File event data emitted by GitWatcher
  */
-export interface GitFileEvent {
+export interface GitWatcherFileEvent {
 	/**
 	 * Relative path to the file from repository root
 	 */
@@ -57,6 +57,16 @@ export interface GitFileEvent {
 	 * Current branch name
 	 */
 	branch: string
+
+	/**
+	 * Whether or not the event is coming from the base branch
+	 */
+	isBaseBranch: boolean
+
+	/**
+	 * Current instance which emitted the event
+	 */
+	watcher: GitWatcher
 }
 
 /**
@@ -81,14 +91,13 @@ interface GitStateSnapshot {
  * ```
  */
 export class GitWatcher implements vscode.Disposable {
-	private readonly config: GitWatcherConfig
 	private readonly emitter: EventEmitter
 	private readonly disposables: vscode.Disposable[] = []
 	private currentState: GitStateSnapshot | null = null
 	private isProcessing = false
 	private defaultBranch: string | null = null
 
-	constructor(config: GitWatcherConfig) {
+	constructor(public config: GitWatcherConfig) {
 		this.config = config
 		this.emitter = new EventEmitter()
 	}
@@ -97,7 +106,7 @@ export class GitWatcher implements vscode.Disposable {
 	 * Register a handler for file events
 	 * @param handler Callback function that receives file event data
 	 */
-	public onFile(handler: (data: GitFileEvent) => void): void {
+	public onFile(handler: (data: GitWatcherFileEvent) => void): void {
 		this.emitter.on("file", handler)
 	}
 
@@ -293,6 +302,14 @@ export class GitWatcher implements vscode.Disposable {
 	}
 
 	/**
+	 * Helper method to emit file events with all required fields
+	 * @param event The file event data to emit
+	 */
+	private emitFile(event: GitWatcherFileEvent): void {
+		this.emitter.emit("file", event)
+	}
+
+	/**
 	 * Scan all tracked files in the repository
 	 */
 	private async scanAllFiles(branch: string): Promise<void> {
@@ -315,10 +332,12 @@ export class GitWatcher implements vscode.Disposable {
 				const fileHash = parts[1]
 				const filePath = parts.slice(3).join(" ") // Handle paths with spaces
 
-				this.emitter.emit("file", {
+				this.emitFile({
 					filePath,
 					fileHash,
 					branch,
+					isBaseBranch: true,
+					watcher: this,
 				})
 			}
 		} catch (error) {
@@ -338,35 +357,39 @@ export class GitWatcher implements vscode.Disposable {
 			// Combine added and modified files (we only care about files that exist)
 			const filesToScan = [...diff.added, ...diff.modified]
 
-			// For each file in the diff, get its hash and emit
-			for (const filePath of filesToScan) {
-				try {
-					// Use git ls-files -s to get the hash for this specific file
-					const lines: string[] = []
-					for await (const line of execGetLines({
-						cmd: `git ls-files -s "${filePath}"`,
-						cwd: this.config.cwd,
-						context: "getting file hash",
-					})) {
-						lines.push(line)
-					}
+			if (filesToScan.length === 0) {
+				return
+			}
 
-					if (lines.length === 0) continue
+			// Build single command with all files (quote each to handle spaces)
+			const quotedFiles = filesToScan.map((f) => `"${f}"`).join(" ")
+			const cmd = `git ls-files -s ${quotedFiles}`
 
-					const trimmed = lines[0].trim()
-					const parts = trimmed.split(/\s+/)
-					if (parts.length < 4) continue
+			// Execute once and parse all results
+			for await (const line of execGetLines({
+				cmd,
+				cwd: this.config.cwd,
+				context: "getting file hashes for diff files",
+			})) {
+				const trimmed = line.trim()
+				if (!trimmed) continue
 
-					const fileHash = parts[1]
+				// Parse git ls-files -s output
+				// Format: <mode> <hash> <stage> <path>
+				// Example: 100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 0 README.md
+				const parts = trimmed.split(/\s+/)
+				if (parts.length < 4) continue
 
-					this.emitter.emit("file", {
-						filePath,
-						fileHash,
-						branch: currentBranch,
-					})
-				} catch (error) {
-					console.warn(`[GitWatcher] Could not get hash for file ${filePath}:`, error)
-				}
+				const fileHash = parts[1]
+				const filePath = parts.slice(3).join(" ") // Handle paths with spaces
+
+				this.emitFile({
+					filePath,
+					fileHash,
+					branch: currentBranch,
+					isBaseBranch: false,
+					watcher: this,
+				})
 			}
 		} catch (error) {
 			console.error("[GitWatcher] Error scanning diff files:", error)

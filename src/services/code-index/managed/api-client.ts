@@ -7,6 +7,7 @@
  */
 
 import axios from "axios"
+import FormData from "form-data"
 import { ManagedCodeChunk, SearchRequest, SearchResult, ServerManifest } from "./types"
 import { logger } from "../../../utils/logging"
 import { getKiloBaseUriFromToken } from "../../../../packages/types/src/kilocode/kilocode"
@@ -161,6 +162,87 @@ export async function deleteFiles(
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
 		logger.error(`Failed to delete files: ${errorMessage}`)
+		throw error
+	}
+}
+
+/**
+ * Parameters for upserting a file to the server
+ */
+export interface UpsertFileParams {
+	/** The file content as a Buffer */
+	fileBuffer: Buffer
+	/** Organization ID (must be a valid UUID) */
+	organizationId: string
+	/** Project ID */
+	projectId: string
+	/** Relative file path from workspace root */
+	filePath: string
+	/** Hash of the file content */
+	fileHash: string
+	/** Git branch name (defaults to 'main') */
+	gitBranch?: string
+	/** Whether this is from a base branch (defaults to true) */
+	isBaseBranch?: boolean
+	/** Authentication token */
+	kilocodeToken: string
+}
+
+/**
+ * Upserts a file to the server using multipart file upload
+ *
+ * @param params Parameters for the file upload
+ * @throws Error if the request fails
+ */
+export async function upsertFile(params: UpsertFileParams): Promise<void> {
+	const {
+		fileBuffer,
+		organizationId,
+		projectId,
+		filePath,
+		fileHash,
+		gitBranch = "main",
+		isBaseBranch = true,
+		kilocodeToken,
+	} = params
+
+	const baseUrl = getKiloBaseUriFromToken(kilocodeToken)
+
+	try {
+		// Create FormData for multipart upload
+		const formData = new FormData()
+
+		// Append the file with metadata
+		const filename = filePath.split("/").pop() || "file"
+		formData.append("file", fileBuffer, {
+			filename,
+			contentType: "application/octet-stream",
+		})
+		formData.append("organizationId", organizationId)
+		formData.append("projectId", projectId)
+		formData.append("filePath", filePath)
+		formData.append("fileHash", fileHash)
+		formData.append("gitBranch", gitBranch)
+		formData.append("isBaseBranch", String(isBaseBranch))
+
+		const response = await axios({
+			method: "POST",
+			url: `${baseUrl}/api/code-indexing/upsert-by-file`,
+			data: formData,
+			headers: {
+				Authorization: `Bearer ${kilocodeToken}`,
+				...formData.getHeaders(),
+			},
+		})
+
+		if (response.status !== 200) {
+			throw new Error(`Failed to upsert file: ${response.statusText}`)
+		}
+
+		logger.info(`Successfully upserted file: ${filePath}`)
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		logger.error(`Failed to upsert file ${filePath}: ${errorMessage}`)
 		throw error
 	}
 }

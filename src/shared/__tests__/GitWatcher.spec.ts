@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { EventEmitter } from "events"
 import * as vscode from "vscode"
-import { GitWatcher, GitWatcherConfig, GitFileEvent } from "../GitWatcher"
+import { GitWatcher, GitWatcherConfig, GitWatcherFileEvent } from "../GitWatcher"
 import * as exec from "../utils/exec"
 import * as gitUtils from "../../services/code-index/managed/git-utils"
 
@@ -97,7 +97,7 @@ describe("GitWatcher", () => {
 			watcher.onFile(handler)
 
 			// Verify handler is registered by emitting an event
-			const testEvent: GitFileEvent = {
+			const testEvent: GitWatcherFileEvent = {
 				filePath: "test.ts",
 				fileHash: "abc123",
 				branch: "main",
@@ -118,7 +118,7 @@ describe("GitWatcher", () => {
 			watcher.onFile(handler1)
 			watcher.onFile(handler2)
 
-			const testEvent: GitFileEvent = {
+			const testEvent: GitWatcherFileEvent = {
 				filePath: "test.ts",
 				fileHash: "abc123",
 				branch: "main",
@@ -204,13 +204,10 @@ describe("GitWatcher", () => {
 				deleted: [],
 			})
 
-			// Mock git ls-files -s output for specific files
-			mockExecGetLines.mockImplementation(async function* ({ cmd }) {
-				if (cmd.includes("new-file.ts")) {
-					yield "100644 abc123 0 new-file.ts"
-				} else if (cmd.includes("existing-file.ts")) {
-					yield "100644 def456 0 existing-file.ts"
-				}
+			// Mock git ls-files -s output for batched command
+			mockExecGetLines.mockImplementation(async function* () {
+				yield "100644 abc123 0 new-file.ts"
+				yield "100644 def456 0 existing-file.ts"
 			})
 
 			const watcher = new GitWatcher(config)
@@ -218,6 +215,14 @@ describe("GitWatcher", () => {
 			watcher.onFile(handler)
 
 			await watcher.scan()
+
+			// Verify single batched command was used
+			expect(mockExecGetLines).toHaveBeenCalledTimes(1)
+			expect(mockExecGetLines).toHaveBeenCalledWith({
+				cmd: 'git ls-files -s "new-file.ts" "existing-file.ts"',
+				cwd: config.cwd,
+				context: "getting file hashes for diff files",
+			})
 
 			expect(handler).toHaveBeenCalledTimes(2)
 			expect(handler).toHaveBeenCalledWith({
@@ -404,35 +409,24 @@ describe("GitWatcher", () => {
 			mockGetCurrentBranch.mockResolvedValue("feature/test")
 			mockGetBaseBranch.mockResolvedValue("main")
 			mockGetGitDiff.mockResolvedValue({
-				added: ["file1.ts", "file2.ts"],
+				added: ["file1.ts"],
 				modified: [],
 				deleted: [],
 			})
 
-			// First file succeeds, second fails
-			let callCount = 0
+			// Mock command failure
 			mockExecGetLines.mockImplementation(async function* () {
-				callCount++
-				if (callCount === 1) {
-					yield "100644 abc123 0 file1.ts"
-				} else {
-					throw new Error("File not found")
-				}
+				throw new Error("Git command failed")
 			})
 
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
 			watcher.onFile(handler)
 
-			// Should not throw, but should only emit for successful file
-			await watcher.scan()
+			// Should throw since the batched command fails
+			await expect(watcher.scan()).rejects.toThrow("Git command failed")
 
-			expect(handler).toHaveBeenCalledTimes(1)
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "file1.ts",
-				fileHash: "abc123",
-				branch: "feature/test",
-			})
+			expect(handler).not.toHaveBeenCalled()
 
 			watcher.dispose()
 		})

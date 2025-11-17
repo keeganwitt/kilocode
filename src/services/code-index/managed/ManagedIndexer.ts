@@ -1,3 +1,4 @@
+// kilocode_change new file
 /**
  * When extension activates, we need to instantiate the ManagedIndexer and then
  * fetch the api configuration deets and then fetch the organization to see
@@ -43,9 +44,19 @@
  */
 
 import * as vscode from "vscode"
+import * as path from "path"
+import { promises as fs } from "fs"
+import pLimit from "p-limit"
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
 import { KiloOrganization } from "../../../shared/kilocode/organization"
 import { OrganizationService } from "../../kilocode/OrganizationService"
+import { GitWatcher, GitWatcherFileEvent } from "../../../shared/GitWatcher"
+import { isGitRepository } from "./git-utils"
+import { getKilocodeConfig } from "../../../utils/kilo-config-file"
+import { getGitRepositoryInfo } from "../../../utils/git"
+import { upsertFile } from "./api-client"
+import { logger } from "../../../utils/logging"
+import { MANAGED_MAX_CONCURRENT_FILES } from "../constants"
 
 interface ManagedIndexerConfig {
 	kilocodeToken: string | null
@@ -55,7 +66,14 @@ interface ManagedIndexerConfig {
 
 export class ManagedIndexer implements vscode.Disposable {
 	// Handle changes to vscode workspace folder changes
-	workspaceFoldersListener = vscode.workspace.onDidChangeWorkspaceFolders(this.onDidChangeWorkspaceFolders)
+	workspaceFoldersListener: vscode.Disposable | null = null
+	watchers: GitWatcher[] = []
+	config: ManagedIndexerConfig | null = null
+	organization: KiloOrganization | null = null
+	isActive = false
+
+	// Concurrency limiter for file upserts
+	private readonly fileUpsertLimit = pLimit(MANAGED_MAX_CONCURRENT_FILES)
 
 	// config: ManagedIndexerConfig = {
 	// 	kilocodeOrganizationId: null,
@@ -72,6 +90,10 @@ export class ManagedIndexer implements vscode.Disposable {
 		public provider: ClineProvider,
 	) {}
 
+	// TODO: The fetchConfig and fetchOrganization functions are sort of spaghetti
+	// code right now. We need to clean this up to be more stateless or better rely
+	// on proper memoization/invalidation techniques
+
 	async fetchConfig(): Promise<ManagedIndexerConfig> {
 		const {
 			apiConfiguration: {
@@ -81,33 +103,141 @@ export class ManagedIndexer implements vscode.Disposable {
 			},
 		} = await this.provider.getState()
 
-		return { kilocodeOrganizationId, kilocodeToken, kilocodeTesterWarningsDisabledUntil }
+		this.config = { kilocodeOrganizationId, kilocodeToken, kilocodeTesterWarningsDisabledUntil }
+
+		return this.config
 	}
 
 	async fetchOrganization(): Promise<KiloOrganization | null> {
 		const config = await this.fetchConfig()
 
 		if (config.kilocodeToken && config.kilocodeOrganizationId) {
-			return await OrganizationService.fetchOrganization(
+			this.organization = await OrganizationService.fetchOrganization(
 				config.kilocodeToken,
 				config.kilocodeOrganizationId,
 				config.kilocodeTesterWarningsDisabledUntil ?? undefined,
 			)
+
+			return this.organization
 		}
 
-		return null
+		this.organization = null
+
+		return this.organization
+	}
+
+	async isEnabled(): Promise<boolean> {
+		const organization = await this.fetchOrganization()
+
+		if (!organization) {
+			console.log("[ManagedIndexer] No organization found, skipping managed indexing")
+			return false
+		}
+
+		if (!OrganizationService.isCodeIndexingEnabled(organization)) {
+			return false
+		}
+
+		return true
+	}
+
+	async start() {
+		vscode.workspace.onDidChangeWorkspaceFolders(this.onDidChangeWorkspaceFolders)
+
+		if (!vscode.workspace.workspaceFolders?.length) {
+			console.log("[ManagedIndexer] No workspace folders found, skipping managed indexing")
+			return
+		}
+
+		if (!(await this.isEnabled())) {
+			console.log("[ManagedIndexer] Managed indexing is not enabled")
+			return
+		}
+
+		this.isActive = true
+		this.watchers = await Promise.all(
+			vscode.workspace.workspaceFolders.map(async (folder) => {
+				const cwd = folder.uri.fsPath
+
+				if (!(await isGitRepository(cwd))) {
+					return null
+				}
+
+				const gitConfig = await getGitRepositoryInfo(cwd)
+				const config = await getKilocodeConfig(cwd, gitConfig.repositoryUrl)
+				const watcher = new GitWatcher({ cwd })
+				const projectId = config?.project?.id
+
+				if (!projectId) {
+					console.log("[ManagedIndexer] No project ID found for workspace folder", cwd)
+					return null
+				}
+
+				watcher.onFile((event) => this.onFile(projectId, event))
+
+				// Perform an initial scan
+				await watcher.scan()
+				// Then start the watcher
+				await watcher.start()
+
+				return watcher
+			}),
+		).then((watchers) => watchers.filter((w) => !!w))
 	}
 
 	dispose() {
-		this.workspaceFoldersListener.dispose()
+		this.workspaceFoldersListener?.dispose()
+		this.workspaceFoldersListener = null
+		this.watchers.forEach((watcher) => watcher.dispose())
+		this.watchers = []
+		this.isActive = false
 	}
 
-	// onConfigChange(config: ManagedIndexerConfig) {
-	// 	if (config.kilocodeToken !== this.config.kilocodeToken) {
-	// 		this.config = config
-	// 		this.organization = null
-	// 	}
-	// }
+	async onFile(projectId: string, { branch, filePath, fileHash, isBaseBranch, watcher }: GitWatcherFileEvent) {
+		if (!this.isActive) {
+			return
+		}
+
+		// Wrap the file processing in the concurrency limiter
+		return this.fileUpsertLimit(async () => {
+			try {
+				// Ensure we have the necessary configuration
+				if (!this.config?.kilocodeToken || !this.config?.kilocodeOrganizationId) {
+					logger.warn("[ManagedIndexer] Missing token or organization ID, skipping file upsert")
+					return
+				}
+
+				const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(watcher.config.cwd, filePath)
+				const fileBuffer = await fs.readFile(absoluteFilePath)
+				const relativeFilePath = path.relative(watcher.config.cwd, absoluteFilePath)
+
+				// Call the upsertFile API
+				await upsertFile({
+					fileBuffer,
+					fileHash,
+					filePath: relativeFilePath,
+					gitBranch: branch,
+					isBaseBranch,
+					organizationId: this.config.kilocodeOrganizationId,
+					projectId,
+					kilocodeToken: this.config.kilocodeToken,
+				})
+
+				logger.info(`[ManagedIndexer] Successfully upserted file: ${relativeFilePath} (branch: ${branch})`)
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				logger.error(`[ManagedIndexer] Failed to upsert file ${filePath}: ${errorMessage}`)
+			}
+		})
+	}
+
+	/**
+	 * Call this function from ClineProvider when a profile change occurs
+	 */
+	async onKilocodeTokenChange() {
+		this.dispose()
+		await this.start()
+	}
 
 	onDidChangeWorkspaceFolders(e: vscode.WorkspaceFoldersChangeEvent) {
 		// Cleanup any watchers and ongoing scans for removed folders
