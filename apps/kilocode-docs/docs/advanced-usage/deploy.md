@@ -1,6 +1,5 @@
 ---
 title: Deploy
-sidebar_position: 7
 ---
 
 # Deploy
