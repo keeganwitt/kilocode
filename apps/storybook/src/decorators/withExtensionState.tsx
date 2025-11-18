@@ -17,7 +17,9 @@ const mockExtensionState = createExtensionStateMock()
 // }
 export const withExtensionState: Decorator = (Story, context) => {
 	const storyOverrides = context.parameters?.extensionState || {}
-	const contextValue = { ...mockExtensionState, ...storyOverrides }
+	// Create a new Proxy that merges overrides with the base mock
+	// This ensures the Proxy's get trap is always invoked
+	const contextValue = createExtensionStateMock(storyOverrides)
 
 	return (
 		<ExtensionStateContext.Provider value={contextValue}>

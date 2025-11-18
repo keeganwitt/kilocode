@@ -5,6 +5,7 @@ import { fn } from "storybook/test"
 
 import ChatView from "../../../webview-ui/src/components/chat/ChatView"
 import { createTaskHeaderMessages, createMockTask, BASE_TIMESTAMP } from "../src/mockData/clineMessages"
+import * as ChatMessages from "../src/mockData/chatMessages"
 
 const meta = {
 	title: "Chat/ChatView",
