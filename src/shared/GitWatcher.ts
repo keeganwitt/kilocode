@@ -103,6 +103,21 @@ export interface GitWatcherFileDeletedEvent extends GitWatcherBaseEvent {
 }
 
 /**
+ * Event emitted when the branch changes
+ */
+export interface GitWatcherBranchChangedEvent extends GitWatcherBaseEvent {
+	type: "branch-changed"
+	/**
+	 * The previous branch name
+	 */
+	previousBranch: string
+	/**
+	 * The new branch name
+	 */
+	newBranch: string
+}
+
+/**
  * Discriminated union of all GitWatcher event types
  */
 export type GitWatcherEvent =
@@ -110,6 +125,7 @@ export type GitWatcherEvent =
 	| GitWatcherScanEndEvent
 	| GitWatcherFileChangedEvent
 	| GitWatcherFileDeletedEvent
+	| GitWatcherBranchChangedEvent
 
 /**
  * @deprecated Use GitWatcherEvent instead. This type alias is provided for backward compatibility.
@@ -144,6 +160,9 @@ interface GitStateSnapshot {
  *       break
  *     case 'scan-end':
  *       console.log(`Scan completed on branch ${event.branch}`)
+ *       break
+ *     case 'branch-changed':
+ *       console.log(`Branch changed from ${event.previousBranch} to ${event.newBranch}`)
  *       break
  *   }
  * })
@@ -341,6 +360,21 @@ export class GitWatcher implements vscode.Disposable {
 
 				if (!branchChanged && !commitChanged) {
 					return
+				}
+
+				// Emit branch-changed event if branch changed
+				if (branchChanged) {
+					const defaultBranch = await this.getDefaultBranch()
+					const isBaseBranch = newState.branch.toLowerCase() === defaultBranch.toLowerCase()
+
+					this.emitEvent({
+						type: "branch-changed",
+						previousBranch: this.currentState.branch,
+						newBranch: newState.branch,
+						branch: newState.branch,
+						isBaseBranch,
+						watcher: this,
+					})
 				}
 
 				// Trigger scan on state change

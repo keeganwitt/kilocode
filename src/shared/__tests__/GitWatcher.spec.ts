@@ -184,6 +184,27 @@ describe("GitWatcher", () => {
 			expect(handler).toHaveBeenCalledWith(deleteEvent)
 			watcher.dispose()
 		})
+
+		it("should emit branch-changed events", () => {
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+
+			watcher.onEvent(handler)
+
+			const branchChangedEvent: GitWatcherEvent = {
+				type: "branch-changed",
+				previousBranch: "main",
+				newBranch: "feature/test",
+				branch: "feature/test",
+				isBaseBranch: false,
+				watcher,
+			}
+
+			;(watcher as any).emitter.emit("event", branchChangedEvent)
+
+			expect(handler).toHaveBeenCalledWith(branchChangedEvent)
+			watcher.dispose()
+		})
 	})
 
 	describe("onFile (deprecated)", () => {
@@ -510,12 +531,59 @@ describe("GitWatcher", () => {
 		it("should handle branch changes", async () => {
 			mockGetCurrentBranch.mockResolvedValueOnce("main").mockResolvedValueOnce("feature/test")
 			mockGetCurrentCommitSha.mockResolvedValueOnce("abc123").mockResolvedValueOnce("abc123")
+			mockGetBaseBranch.mockResolvedValue("main")
 
 			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+			watcher.onEvent(handler)
+
 			await watcher.start()
+
+			// Mock scan to avoid actual git operations
+			const scanSpy = vi.spyOn(watcher as any, "scan").mockResolvedValue(undefined)
 
 			// Simulate branch change by calling handleGitChange
 			await (watcher as any).handleGitChange()
+
+			// Should emit branch-changed event
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "branch-changed",
+					previousBranch: "main",
+					newBranch: "feature/test",
+					branch: "feature/test",
+					isBaseBranch: false,
+				}),
+			)
+
+			// Should trigger scan after branch change
+			expect(scanSpy).toHaveBeenCalled()
+
+			watcher.dispose()
+		})
+
+		it("should not emit branch-changed event when only commit changes", async () => {
+			mockGetCurrentBranch.mockResolvedValue("main")
+			mockGetCurrentCommitSha.mockResolvedValueOnce("abc123").mockResolvedValueOnce("def456")
+
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+			watcher.onEvent(handler)
+
+			await watcher.start()
+
+			// Mock scan to avoid actual git operations
+			const scanSpy = vi.spyOn(watcher as any, "scan").mockResolvedValue(undefined)
+
+			// Simulate commit change (same branch)
+			await (watcher as any).handleGitChange()
+
+			// Should NOT emit branch-changed event
+			const branchChangedCalls = handler.mock.calls.filter((call) => call[0].type === "branch-changed")
+			expect(branchChangedCalls).toHaveLength(0)
+
+			// Should still trigger scan
+			expect(scanSpy).toHaveBeenCalled()
 
 			watcher.dispose()
 		})
