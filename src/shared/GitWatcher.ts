@@ -1,9 +1,11 @@
 // kilocode_change - new file
 /**
- * GitWatcher - Monitors git repository state and emits file events
+ * GitWatcher - Monitors git repository state and emits events
  *
  * This module provides a lightweight git watcher that:
- * - Emits file events for tracked files in a git repository
+ * - Emits events for scan lifecycle (start/end)
+ * - Emits events for file changes (added/modified) with git hashes
+ * - Emits events for file deletions
  * - Monitors git state changes (commits, branch switches)
  * - Supports delta-based scanning on feature branches
  * - Implements vscode.Disposable for proper cleanup
@@ -40,19 +42,9 @@ export interface GitWatcherConfig {
 }
 
 /**
- * File event data emitted by GitWatcher
+ * Base event data shared by all GitWatcher events
  */
-export interface GitWatcherFileEvent {
-	/**
-	 * Relative path to the file from repository root
-	 */
-	filePath: string
-
-	/**
-	 * Git hash of the file (from git ls-files -s)
-	 */
-	fileHash: string
-
+interface GitWatcherBaseEvent {
 	/**
 	 * Current branch name
 	 */
@@ -70,6 +62,61 @@ export interface GitWatcherFileEvent {
 }
 
 /**
+ * Event emitted when a scan starts
+ */
+export interface GitWatcherScanStartEvent extends GitWatcherBaseEvent {
+	type: "scan-start"
+}
+
+/**
+ * Event emitted when a scan completes
+ */
+export interface GitWatcherScanEndEvent extends GitWatcherBaseEvent {
+	type: "scan-end"
+}
+
+/**
+ * Event emitted for a file change (added or modified)
+ */
+export interface GitWatcherFileChangedEvent extends GitWatcherBaseEvent {
+	type: "file-changed"
+	/**
+	 * Relative path to the file from repository root
+	 */
+	filePath: string
+
+	/**
+	 * Git hash of the file (from git ls-files -s)
+	 */
+	fileHash: string
+}
+
+/**
+ * Event emitted for a file deletion
+ */
+export interface GitWatcherFileDeletedEvent extends GitWatcherBaseEvent {
+	type: "file-deleted"
+	/**
+	 * Relative path to the deleted file from repository root
+	 */
+	filePath: string
+}
+
+/**
+ * Discriminated union of all GitWatcher event types
+ */
+export type GitWatcherEvent =
+	| GitWatcherScanStartEvent
+	| GitWatcherScanEndEvent
+	| GitWatcherFileChangedEvent
+	| GitWatcherFileDeletedEvent
+
+/**
+ * @deprecated Use GitWatcherEvent instead. This type alias is provided for backward compatibility.
+ */
+export type GitWatcherFileEvent = GitWatcherFileChangedEvent
+
+/**
  * Git state snapshot for change detection
  */
 interface GitStateSnapshot {
@@ -79,13 +126,26 @@ interface GitStateSnapshot {
 }
 
 /**
- * GitWatcher - Monitors git repository and emits file events
+ * GitWatcher - Monitors git repository and emits events
  *
  * Usage:
  * ```typescript
  * const watcher = new GitWatcher({ cwd: '/path/to/repo' })
- * watcher.onFile((event) => {
- *   console.log(`File: ${event.filePath}, Hash: ${event.fileHash}, Branch: ${event.branch}`)
+ * watcher.onEvent((event) => {
+ *   switch (event.type) {
+ *     case 'scan-start':
+ *       console.log(`Scan started on branch ${event.branch}`)
+ *       break
+ *     case 'file-changed':
+ *       console.log(`File: ${event.filePath}, Hash: ${event.fileHash}`)
+ *       break
+ *     case 'file-deleted':
+ *       console.log(`File deleted: ${event.filePath}`)
+ *       break
+ *     case 'scan-end':
+ *       console.log(`Scan completed on branch ${event.branch}`)
+ *       break
+ *   }
  * })
  * await watcher.scan()
  * ```
@@ -103,11 +163,22 @@ export class GitWatcher implements vscode.Disposable {
 	}
 
 	/**
-	 * Register a handler for file events
-	 * @param handler Callback function that receives file event data
+	 * Register a handler for all GitWatcher events
+	 * @param handler Callback function that receives event data
 	 */
-	public onFile(handler: (data: GitWatcherFileEvent) => void): void {
-		this.emitter.on("file", handler)
+	public onEvent(handler: (data: GitWatcherEvent) => void): void {
+		this.emitter.on("event", handler)
+	}
+
+	/**
+	 * @deprecated Use onEvent instead. This method is provided for backward compatibility.
+	 */
+	public onFile(handler: (data: GitWatcherFileChangedEvent) => void): void {
+		this.emitter.on("event", (event: GitWatcherEvent) => {
+			if (event.type === "file-changed") {
+				handler(event)
+			}
+		})
 	}
 
 	/**
@@ -302,11 +373,18 @@ export class GitWatcher implements vscode.Disposable {
 	}
 
 	/**
-	 * Helper method to emit file events with all required fields
-	 * @param event The file event data to emit
+	 * Helper method to emit events
+	 * @param event The event data to emit
 	 */
-	private emitFile(event: GitWatcherFileEvent): void {
-		this.emitter.emit("file", event)
+	private emitEvent(event: GitWatcherEvent): void {
+		this.emitter.emit("event", event)
+	}
+
+	/**
+	 * @deprecated Use emitEvent instead
+	 */
+	private emitFile(event: GitWatcherFileChangedEvent): void {
+		this.emitEvent(event)
 	}
 
 	/**
@@ -314,6 +392,14 @@ export class GitWatcher implements vscode.Disposable {
 	 */
 	private async scanAllFiles(branch: string): Promise<void> {
 		try {
+			// Emit scan start event
+			this.emitEvent({
+				type: "scan-start",
+				branch,
+				isBaseBranch: true,
+				watcher: this,
+			})
+
 			// Use git ls-files -s to get all tracked files with their hashes
 			for await (const line of execGetLines({
 				cmd: "git ls-files -s",
@@ -332,7 +418,8 @@ export class GitWatcher implements vscode.Disposable {
 				const fileHash = parts[1]
 				const filePath = parts.slice(3).join(" ") // Handle paths with spaces
 
-				this.emitFile({
+				this.emitEvent({
+					type: "file-changed",
 					filePath,
 					fileHash,
 					branch,
@@ -340,6 +427,14 @@ export class GitWatcher implements vscode.Disposable {
 					watcher: this,
 				})
 			}
+
+			// Emit scan end event
+			this.emitEvent({
+				type: "scan-end",
+				branch,
+				isBaseBranch: true,
+				watcher: this,
+			})
 		} catch (error) {
 			console.error("[GitWatcher] Error scanning all files:", error)
 			throw error
@@ -351,13 +446,39 @@ export class GitWatcher implements vscode.Disposable {
 	 */
 	private async scanDiffFiles(currentBranch: string, defaultBranch: string): Promise<void> {
 		try {
+			// Emit scan start event
+			this.emitEvent({
+				type: "scan-start",
+				branch: currentBranch,
+				isBaseBranch: false,
+				watcher: this,
+			})
+
 			// Get the diff between current branch and default branch
 			const diff = await getGitDiff(currentBranch, defaultBranch, this.config.cwd)
+
+			// Emit deleted file events
+			for (const deletedFile of diff.deleted) {
+				this.emitEvent({
+					type: "file-deleted",
+					filePath: deletedFile,
+					branch: currentBranch,
+					isBaseBranch: false,
+					watcher: this,
+				})
+			}
 
 			// Combine added and modified files (we only care about files that exist)
 			const filesToScan = [...diff.added, ...diff.modified]
 
 			if (filesToScan.length === 0) {
+				// Emit scan end even if no files to scan
+				this.emitEvent({
+					type: "scan-end",
+					branch: currentBranch,
+					isBaseBranch: false,
+					watcher: this,
+				})
 				return
 			}
 
@@ -383,7 +504,8 @@ export class GitWatcher implements vscode.Disposable {
 				const fileHash = parts[1]
 				const filePath = parts.slice(3).join(" ") // Handle paths with spaces
 
-				this.emitFile({
+				this.emitEvent({
+					type: "file-changed",
 					filePath,
 					fileHash,
 					branch: currentBranch,
@@ -391,6 +513,14 @@ export class GitWatcher implements vscode.Disposable {
 					watcher: this,
 				})
 			}
+
+			// Emit scan end event
+			this.emitEvent({
+				type: "scan-end",
+				branch: currentBranch,
+				isBaseBranch: false,
+				watcher: this,
+			})
 		} catch (error) {
 			console.error("[GitWatcher] Error scanning diff files:", error)
 			throw error

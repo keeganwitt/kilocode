@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { EventEmitter } from "events"
 import * as vscode from "vscode"
-import { GitWatcher, GitWatcherConfig, GitWatcherFileEvent } from "../GitWatcher"
+import { GitWatcher, GitWatcherConfig, GitWatcherEvent, GitWatcherFileChangedEvent } from "../GitWatcher"
 import * as exec from "../utils/exec"
 import * as gitUtils from "../../services/code-index/managed/git-utils"
 
@@ -89,22 +89,25 @@ describe("GitWatcher", () => {
 		})
 	})
 
-	describe("onFile", () => {
-		it("should register a file event handler", () => {
+	describe("onEvent", () => {
+		it("should register an event handler", () => {
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
 
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			// Verify handler is registered by emitting an event
-			const testEvent: GitWatcherFileEvent = {
+			const testEvent: GitWatcherFileChangedEvent = {
+				type: "file-changed",
 				filePath: "test.ts",
 				fileHash: "abc123",
 				branch: "main",
+				isBaseBranch: true,
+				watcher,
 			}
 
 			// Access the private emitter to test
-			;(watcher as any).emitter.emit("file", testEvent)
+			;(watcher as any).emitter.emit("event", testEvent)
 
 			expect(handler).toHaveBeenCalledWith(testEvent)
 			watcher.dispose()
@@ -115,19 +118,127 @@ describe("GitWatcher", () => {
 			const handler1 = vi.fn()
 			const handler2 = vi.fn()
 
-			watcher.onFile(handler1)
-			watcher.onFile(handler2)
+			watcher.onEvent(handler1)
+			watcher.onEvent(handler2)
 
-			const testEvent: GitWatcherFileEvent = {
+			const testEvent: GitWatcherFileChangedEvent = {
+				type: "file-changed",
 				filePath: "test.ts",
 				fileHash: "abc123",
 				branch: "main",
+				isBaseBranch: true,
+				watcher,
 			}
 
-			;(watcher as any).emitter.emit("file", testEvent)
+			;(watcher as any).emitter.emit("event", testEvent)
 
 			expect(handler1).toHaveBeenCalledWith(testEvent)
 			expect(handler2).toHaveBeenCalledWith(testEvent)
+			watcher.dispose()
+		})
+
+		it("should emit scan-start and scan-end events", () => {
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+
+			watcher.onEvent(handler)
+
+			const scanStartEvent: GitWatcherEvent = {
+				type: "scan-start",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			}
+
+			const scanEndEvent: GitWatcherEvent = {
+				type: "scan-end",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			}
+
+			;(watcher as any).emitter.emit("event", scanStartEvent)
+			;(watcher as any).emitter.emit("event", scanEndEvent)
+
+			expect(handler).toHaveBeenCalledWith(scanStartEvent)
+			expect(handler).toHaveBeenCalledWith(scanEndEvent)
+			watcher.dispose()
+		})
+
+		it("should emit file-deleted events", () => {
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+
+			watcher.onEvent(handler)
+
+			const deleteEvent: GitWatcherEvent = {
+				type: "file-deleted",
+				filePath: "deleted.ts",
+				branch: "feature/test",
+				isBaseBranch: false,
+				watcher,
+			}
+
+			;(watcher as any).emitter.emit("event", deleteEvent)
+
+			expect(handler).toHaveBeenCalledWith(deleteEvent)
+			watcher.dispose()
+		})
+	})
+
+	describe("onFile (deprecated)", () => {
+		it("should still work for backward compatibility", () => {
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+
+			watcher.onFile(handler)
+
+			// Emit a file-changed event
+			const testEvent: GitWatcherFileChangedEvent = {
+				type: "file-changed",
+				filePath: "test.ts",
+				fileHash: "abc123",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			}
+
+			;(watcher as any).emitter.emit("event", testEvent)
+
+			expect(handler).toHaveBeenCalledWith(testEvent)
+			watcher.dispose()
+		})
+
+		it("should only receive file-changed events", () => {
+			const watcher = new GitWatcher(config)
+			const handler = vi.fn()
+
+			watcher.onFile(handler)
+
+			// Emit various event types
+			;(watcher as any).emitter.emit("event", {
+				type: "scan-start",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			})
+			;(watcher as any).emitter.emit("event", {
+				type: "file-changed",
+				filePath: "test.ts",
+				fileHash: "abc123",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			})
+			;(watcher as any).emitter.emit("event", {
+				type: "scan-end",
+				branch: "main",
+				isBaseBranch: true,
+				watcher,
+			})
+
+			// Should only be called once for file-changed event
+			expect(handler).toHaveBeenCalledTimes(1)
 			watcher.dispose()
 		})
 	})
@@ -176,21 +287,50 @@ describe("GitWatcher", () => {
 
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			await watcher.scan()
 
-			expect(handler).toHaveBeenCalledTimes(2)
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "README.md",
-				fileHash: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-				branch: "main",
-			})
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "src/index.ts",
-				fileHash: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
-				branch: "main",
-			})
+			// Should emit: scan-start, file-changed (x2), scan-end
+			expect(handler).toHaveBeenCalledTimes(4)
+
+			// Check scan-start event
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "scan-start",
+					branch: "main",
+					isBaseBranch: true,
+				}),
+			)
+
+			// Check file-changed events
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "README.md",
+					fileHash: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+					branch: "main",
+					isBaseBranch: true,
+				}),
+			)
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "src/index.ts",
+					fileHash: "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
+					branch: "main",
+					isBaseBranch: true,
+				}),
+			)
+
+			// Check scan-end event
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "scan-end",
+					branch: "main",
+					isBaseBranch: true,
+				}),
+			)
 
 			watcher.dispose()
 		})
@@ -212,7 +352,7 @@ describe("GitWatcher", () => {
 
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			await watcher.scan()
 
@@ -224,17 +364,27 @@ describe("GitWatcher", () => {
 				context: "getting file hashes for diff files",
 			})
 
-			expect(handler).toHaveBeenCalledTimes(2)
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "new-file.ts",
-				fileHash: "abc123",
-				branch: "feature/test",
-			})
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "existing-file.ts",
-				fileHash: "def456",
-				branch: "feature/test",
-			})
+			// Should emit: scan-start, file-changed (x2), scan-end
+			expect(handler).toHaveBeenCalledTimes(4)
+
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "new-file.ts",
+					fileHash: "abc123",
+					branch: "feature/test",
+					isBaseBranch: false,
+				}),
+			)
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "existing-file.ts",
+					fileHash: "def456",
+					branch: "feature/test",
+					isBaseBranch: false,
+				}),
+			)
 
 			watcher.dispose()
 		})
@@ -244,7 +394,7 @@ describe("GitWatcher", () => {
 
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			await watcher.scan()
 
@@ -266,15 +416,18 @@ describe("GitWatcher", () => {
 
 			const watcher = new GitWatcher(config)
 			const handler = vi.fn()
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			await watcher.scan()
 
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "path with spaces/file.ts",
-				fileHash: "abc123",
-				branch: "main",
-			})
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "path with spaces/file.ts",
+					fileHash: "abc123",
+					branch: "main",
+				}),
+			)
 
 			watcher.dispose()
 		})
@@ -297,16 +450,20 @@ describe("GitWatcher", () => {
 
 			const watcher = new GitWatcher(configWithOverride)
 			const handler = vi.fn()
-			watcher.onFile(handler)
+			watcher.onEvent(handler)
 
 			await watcher.scan()
 
 			// Should scan all files since we're on the default branch (develop)
-			expect(handler).toHaveBeenCalledWith({
-				filePath: "test.ts",
-				fileHash: "abc123",
-				branch: "develop",
-			})
+			expect(handler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "file-changed",
+					filePath: "test.ts",
+					fileHash: "abc123",
+					branch: "develop",
+					isBaseBranch: true,
+				}),
+			)
 
 			// getBaseBranch should not be called since we have an override
 			expect(mockGetBaseBranch).not.toHaveBeenCalled()

@@ -60,7 +60,7 @@ import pLimit from "p-limit"
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
 import { KiloOrganization } from "../../../shared/kilocode/organization"
 import { OrganizationService } from "../../kilocode/OrganizationService"
-import { GitWatcher, GitWatcherFileEvent } from "../../../shared/GitWatcher"
+import { GitWatcher, GitWatcherEvent } from "../../../shared/GitWatcher"
 import { getCurrentBranch, isGitRepository } from "./git-utils"
 import { getKilocodeConfig } from "../../../utils/kilo-config-file"
 import { getGitRepositoryInfo } from "../../../utils/git"
@@ -198,7 +198,7 @@ export class ManagedIndexer implements vscode.Disposable {
 				}
 				const manifest = await getServerManifest(kilocodeOrganizationId, projectId, branch, kilocodeToken)
 
-				watcher.onFile((event) => this.onFile(Object.assign(event, { projectId, manifest, config })))
+				watcher.onEvent((event) => this.onEvent(Object.assign(event, { projectId, manifest, config })))
 
 				// Perform an initial scan
 				await watcher.scan()
@@ -218,55 +218,71 @@ export class ManagedIndexer implements vscode.Disposable {
 		this.isActive = false
 	}
 
-	async onFile({
-		branch,
-		filePath,
-		fileHash,
-		isBaseBranch,
-		projectId,
-		manifest,
-		watcher,
-	}: GitWatcherFileEvent & { projectId: string; manifest: ServerManifest }) {
+	async onEvent(event: GitWatcherEvent & { projectId: string; manifest: ServerManifest }): Promise<void> {
 		if (!this.isActive) {
 			return
 		}
 
-		// Already indexed
-		if (manifest.files.some((f) => f.filePath === filePath && f.fileHash === f.fileHash)) {
-			return
-		}
+		// Handle different event types
+		switch (event.type) {
+			case "scan-start":
+				logger.info(`[ManagedIndexer] Scan started on branch ${event.branch}`)
+				break
 
-		// Concurrently process the file
-		return this.fileUpsertLimit(async () => {
-			try {
-				// Ensure we have the necessary configuration
-				if (!this.config?.kilocodeToken || !this.config?.kilocodeOrganizationId) {
-					logger.warn("[ManagedIndexer] Missing token or organization ID, skipping file upsert")
+			case "scan-end":
+				logger.info(`[ManagedIndexer] Scan completed on branch ${event.branch}`)
+				break
+
+			case "file-deleted":
+				logger.info(`[ManagedIndexer] File deleted: ${event.filePath} on branch ${event.branch}`)
+				// TODO: Implement file deletion handling if needed
+				break
+
+			case "file-changed": {
+				const { branch, filePath, fileHash, isBaseBranch, projectId, manifest, watcher } = event
+
+				// Already indexed
+				if (manifest.files.some((f) => f.filePath === filePath && f.fileHash === fileHash)) {
 					return
 				}
 
-				const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(watcher.config.cwd, filePath)
-				const fileBuffer = await fs.readFile(absoluteFilePath)
-				const relativeFilePath = path.relative(watcher.config.cwd, absoluteFilePath)
+				// Concurrently process the file
+				return this.fileUpsertLimit(async () => {
+					try {
+						// Ensure we have the necessary configuration
+						if (!this.config?.kilocodeToken || !this.config?.kilocodeOrganizationId) {
+							logger.warn("[ManagedIndexer] Missing token or organization ID, skipping file upsert")
+							return
+						}
 
-				// Call the upsertFile API
-				await upsertFile({
-					fileBuffer,
-					fileHash,
-					filePath: relativeFilePath,
-					gitBranch: branch,
-					isBaseBranch,
-					organizationId: this.config.kilocodeOrganizationId,
-					projectId,
-					kilocodeToken: this.config.kilocodeToken,
+						const absoluteFilePath = path.isAbsolute(filePath)
+							? filePath
+							: path.join(watcher.config.cwd, filePath)
+						const fileBuffer = await fs.readFile(absoluteFilePath)
+						const relativeFilePath = path.relative(watcher.config.cwd, absoluteFilePath)
+
+						// Call the upsertFile API
+						await upsertFile({
+							fileBuffer,
+							fileHash,
+							filePath: relativeFilePath,
+							gitBranch: branch,
+							isBaseBranch,
+							organizationId: this.config.kilocodeOrganizationId,
+							projectId,
+							kilocodeToken: this.config.kilocodeToken,
+						})
+
+						logger.info(
+							`[ManagedIndexer] Successfully upserted file: ${relativeFilePath} (branch: ${branch})`,
+						)
+					} catch (error) {
+						const errorMessage = error instanceof Error ? error.message : String(error)
+						logger.error(`[ManagedIndexer] Failed to upsert file ${filePath}: ${errorMessage}`)
+					}
 				})
-
-				logger.info(`[ManagedIndexer] Successfully upserted file: ${relativeFilePath} (branch: ${branch})`)
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error)
-				logger.error(`[ManagedIndexer] Failed to upsert file ${filePath}: ${errorMessage}`)
 			}
-		})
+		}
 	}
 
 	/**
