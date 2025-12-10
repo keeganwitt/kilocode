@@ -54,6 +54,12 @@ export abstract class BaseTelemetryClient implements TelemetryClient {
 		// Event properties take precedence in case of conflicts.
 		const mergedProperties = { ...providerProperties, ...(event.properties || {}) }
 
+		// Add organization ID if available from provider properties
+		// This ensures all events include the organization ID when present
+		if (providerProperties.kilocodeOrganizationId && !mergedProperties.kilocodeOrganizationId) {
+			mergedProperties.kilocodeOrganizationId = providerProperties.kilocodeOrganizationId
+		}
+
 		// Filter out properties that shouldn't be captured by this client
 		return Object.fromEntries(Object.entries(mergedProperties).filter(([key]) => this.isPropertyCapturable(key)))
 	}
