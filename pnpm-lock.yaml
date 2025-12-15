@@ -945,8 +945,8 @@ importers:
         specifier: ^10.1.1
         version: 10.1.8(eslint@9.28.0(jiti@2.4.2))
       eslint-plugin-turbo:
-        specifier: ^2.4.4
-        version: 2.5.6(eslint@9.28.0(jiti@2.4.2))(turbo@2.6.1)
+        specifier: ^2.6.3
+        version: 2.6.3(eslint@9.28.0(jiti@2.4.2))(turbo@2.6.1)
       ink-testing-library:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@18.3.23)
@@ -1515,8 +1515,8 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0(eslint@9.27.0(jiti@2.4.2))
       eslint-plugin-turbo:
-        specifier: ^2.4.4
-        version: 2.5.6(eslint@9.27.0(jiti@2.4.2))(turbo@2.6.1)
+        specifier: ^2.6.3
+        version: 2.6.3(eslint@9.27.0(jiti@2.4.2))(turbo@2.6.1)
       globals:
         specifier: ^16.0.0
         version: 16.1.0
@@ -4964,6 +4964,7 @@ packages:
   '@lancedb/lancedb@0.21.3':
     resolution: {integrity: sha512-hfzp498BfcCJ730fV1YGGoXVxRgE+W1n0D0KwanKlbt8bBPSQ6E6Tf8mPXc8rKdAXIRR3o5mTzMG3z3Fda+m3Q==}
     engines: {node: '>= 18'}
+    cpu: [x64, arm64]
     os: [darwin, linux, win32]
     peerDependencies:
       apache-arrow: '>=15.0.0 <=18.1.0'
@@ -7974,8 +7975,8 @@ packages:
   '@types/node@20.17.57':
     resolution: {integrity: sha512-f3T4y6VU4fVQDKVqJV4Uppy8c1p/sVvS3peyqxyWnzkqXFJLRU7Y1Bl7rMS1Qe9z0v4M6McY0Fp9yBsgHJUsWQ==}
 
-  '@types/node@20.19.26':
-    resolution: {integrity: sha512-0l6cjgF0XnihUpndDhk+nyD3exio3iKaYROSgvh/qSevPXax3L8p5DBRFjbvalnwatGgHEQn2R88y2fA3g4irg==}
+  '@types/node@20.19.27':
+    resolution: {integrity: sha512-N2clP5pJhB2YnZJ3PIHFk5RkygRX5WO/5f0WC08tp0wd+sv0rsJk3MqWn3CbNmT2J505a5336jaQj4ph1AdMug==}
 
   '@types/node@24.2.1':
     resolution: {integrity: sha512-DRh5K+ka5eJic8CjH7td8QpYEV6Zo10gfRkjHCO3weqZHWDtAaSTFtl4+VMqOJ4N5jcuhZ9/l+yy8rVgw7BQeQ==}
@@ -11331,8 +11332,8 @@ packages:
     peerDependencies:
       eslint: ^3 || ^4 || ^5 || ^6 || ^7 || ^8 || ^9.7
 
-  eslint-plugin-turbo@2.5.6:
-    resolution: {integrity: sha512-KUDE23aP2JV8zbfZ4TeM1HpAXzMM/AYG/bJam7P4AalUxas8Pd/lS/6R3p4uX91qJcH1LwL4h0ED48nDe8KorQ==}
+  eslint-plugin-turbo@2.6.3:
+    resolution: {integrity: sha512-91WZ+suhT/pk+qNS0/rqT43xLUlUblsa3a8jKmAStGhkJCmR2uX0oWo/e0Edb+It8MdnteXuYpCkvsK4Vw8FtA==}
     peerDependencies:
       eslint: '>6.6.0'
       turbo: '>2.0.0'
@@ -15026,7 +15027,7 @@ packages:
   next@15.2.6:
     resolution: {integrity: sha512-DIKFctUpZoCq5ok2ztVU+PqhWsbiqM9xNP7rHL2cAp29NQcmDp7Y6JnBBhHRbFt4bCsCZigj6uh+/Gwh2158Wg==}
     engines: {node: ^18.18.0 || ^19.8.0 || >= 20.0.0}
-    deprecated: This version has a security vulnerability. Please upgrade to a patched version. See https://nextjs.org/blog/CVE-2025-66478 for more details.
+    deprecated: This version has a security vulnerability. Please upgrade to a patched version. See https://nextjs.org/blog/security-update-2025-12-11 for more details.
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.1.0
@@ -27488,7 +27489,7 @@ snapshots:
     dependencies:
       undici-types: 6.19.8
 
-  '@types/node@20.19.26':
+  '@types/node@20.19.27':
     dependencies:
       undici-types: 6.21.0
 
@@ -28621,7 +28622,7 @@ snapshots:
       '@swc/helpers': 0.5.17
       '@types/command-line-args': 5.2.3
       '@types/command-line-usage': 5.0.4
-      '@types/node': 20.19.26
+      '@types/node': 20.19.27
       command-line-args: 5.2.1
       command-line-usage: 7.0.3
       flatbuffers: 24.12.23
@@ -31399,13 +31400,13 @@ snapshots:
       string.prototype.matchall: 4.0.12
       string.prototype.repeat: 1.0.0
 
-  eslint-plugin-turbo@2.5.6(eslint@9.27.0(jiti@2.4.2))(turbo@2.6.1):
+  eslint-plugin-turbo@2.6.3(eslint@9.27.0(jiti@2.4.2))(turbo@2.6.1):
     dependencies:
       dotenv: 16.0.3
       eslint: 9.27.0(jiti@2.4.2)
       turbo: 2.6.1
 
-  eslint-plugin-turbo@2.5.6(eslint@9.28.0(jiti@2.4.2))(turbo@2.6.1):
+  eslint-plugin-turbo@2.6.3(eslint@9.28.0(jiti@2.4.2))(turbo@2.6.1):
     dependencies:
       dotenv: 16.0.3
       eslint: 9.28.0(jiti@2.4.2)
