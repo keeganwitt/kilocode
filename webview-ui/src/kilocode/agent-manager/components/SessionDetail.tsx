@@ -16,6 +16,7 @@ import {
 import { sessionMachineUiStateAtom, selectedSessionMachineStateAtom } from "../state/atoms/stateMachine"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
+import { BranchPicker } from "./BranchPicker"
 import { vscode } from "../utils/vscode"
 import { formatRelativeTime, createRelativeTimeLabels } from "../utils/timeUtils"
 import {
@@ -248,6 +249,8 @@ function NewAgentForm() {
 	const [isFocused, setIsFocused] = useState(false)
 	const [isDropdownOpen, setIsDropdownOpen] = useState(false)
 	const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false)
+	const [selectedBranch, setSelectedBranch] = useState<string | null>(null)
+	const [isBranchPickerOpen, setIsBranchPickerOpen] = useState(false)
 	const dropdownRef = useRef<HTMLDivElement>(null)
 	const versionDropdownRef = useRef<HTMLDivElement>(null)
 	const startSessionFailedCounter = useAtomValue(startSessionFailedCounterAtom)
@@ -262,6 +265,18 @@ function NewAgentForm() {
 			setIsStarting(false)
 		}
 	}, [startSessionFailedCounter])
+
+	// Request branches on mount and when switching to worktree mode
+	useEffect(() => {
+		vscode.postMessage({ type: "agentManager.listBranches" })
+	}, [])
+
+	// Also request when switching to worktree mode
+	useEffect(() => {
+		if (effectiveRunMode === "worktree") {
+			vscode.postMessage({ type: "agentManager.listBranches" })
+		}
+	}, [effectiveRunMode])
 
 	// Close dropdowns when clicking outside
 	useEffect(() => {
@@ -300,6 +315,7 @@ function NewAgentForm() {
 			parallelMode: effectiveRunMode === "worktree",
 			versions: versionCount,
 			labels,
+			existingBranch: selectedBranch || undefined,
 		})
 	}
 
@@ -477,6 +493,24 @@ function NewAgentForm() {
 							)}
 						</div>
 
+						{/* Branch Picker Button - only show in worktree single-version mode */}
+						{effectiveRunMode === "worktree" && !isMultiVersion && (
+							<StandardTooltip content={t("sessionDetail.branchPickerTooltip")}>
+								<button
+									className="am-run-mode-trigger-inline"
+									onClick={() => setIsBranchPickerOpen(true)}
+									disabled={isStarting}
+									type="button"
+									title={t("sessionDetail.selectBranch")}>
+									<GitBranch size={14} />
+									<span className="truncate max-w-[80px] text-sm">
+										{selectedBranch || t("sessionDetail.selectBranch")}
+									</span>
+									<ChevronDown size={10} className="am-chevron" />
+								</button>
+							</StandardTooltip>
+						)}
+
 						{/* Start Button */}
 						<button
 							className={cn(
@@ -521,6 +555,15 @@ function NewAgentForm() {
 					)}
 				</div>
 			</div>
+
+			{/* Branch Picker Modal */}
+			{isBranchPickerOpen && (
+				<BranchPicker
+					selectedBranch={selectedBranch}
+					onSelect={setSelectedBranch}
+					onClose={() => setIsBranchPickerOpen(false)}
+				/>
+			)}
 		</div>
 	)
 }

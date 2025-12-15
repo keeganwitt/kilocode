@@ -406,3 +406,60 @@ export async function getGitStatus(cwd: string, maxFiles: number = 20): Promise<
 		return null
 	}
 }
+
+/**
+ * Lists all local branches in the repository
+ * @param cwd The working directory to check git branches in
+ * @returns Array of local branch names, or empty array if not a git repository
+ */
+export async function listLocalBranches(cwd: string): Promise<string[]> {
+	try {
+		const isInstalled = await checkGitInstalled()
+		if (!isInstalled) {
+			return []
+		}
+
+		const isRepo = await checkGitRepo(cwd)
+		if (!isRepo) {
+			return []
+		}
+
+		// Use standard git branch output (more portable than --format with shell quoting)
+		// Output format: "* main\n  feature/foo\n  bugfix/bar"
+		const { stdout } = await execAsync("git branch", { cwd })
+		return stdout
+			.trim()
+			.split("\n")
+			.map((line) => line.replace(/^\*?\s*/, "").trim()) // Remove leading * and whitespace
+			.filter((name) => name.length > 0)
+	} catch (error) {
+		console.error("Error listing local branches:", error)
+		return []
+	}
+}
+
+/**
+ * Gets the current branch name
+ * @param cwd The working directory to check the current branch in
+ * @returns The current branch name, or undefined if not a git repository or in detached HEAD state
+ */
+export async function getCurrentBranch(cwd: string): Promise<string | undefined> {
+	try {
+		const isInstalled = await checkGitInstalled()
+		if (!isInstalled) {
+			return undefined
+		}
+
+		const isRepo = await checkGitRepo(cwd)
+		if (!isRepo) {
+			return undefined
+		}
+
+		const { stdout } = await execAsync("git branch --show-current", { cwd })
+		const branch = stdout.trim()
+		return branch.length > 0 ? branch : undefined
+	} catch (error) {
+		console.error("Error getting current branch:", error)
+		return undefined
+	}
+}
