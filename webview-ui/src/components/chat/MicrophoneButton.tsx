@@ -9,8 +9,7 @@ interface MicrophoneButtonProps {
 	isRecording: boolean
 	onClick: () => void
 	containerWidth?: number
-	disabled?: boolean
-	tooltipContent?: string
+	disabled?: boolean // Visual disabled state only - button is always clickable
 }
 
 export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
@@ -18,7 +17,6 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 	onClick,
 	containerWidth,
 	disabled = false,
-	tooltipContent,
 }) => {
 	const { t } = useTranslation()
 
@@ -27,12 +25,11 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 		: t("kilocode:speechToText.startRecording")
 
 	return (
-		<StandardTooltip content={tooltipContent || defaultTooltip}>
+		<StandardTooltip content={defaultTooltip}>
 			<button
 				aria-label={
 					isRecording ? t("kilocode:speechToText.stopRecording") : t("kilocode:speechToText.startRecording")
 				}
-				disabled={disabled}
 				onClick={onClick}
 				className={cn(
 					"relative inline-flex items-center justify-center",

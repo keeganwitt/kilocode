@@ -36,6 +36,7 @@ import { IndexingStatusBadge } from "./IndexingStatusBadge"
 import { MicrophoneButton } from "./MicrophoneButton" // kilocode_change: STT microphone button
 import { VolumeVisualizer } from "./VolumeVisualizer" // kilocode_change: STT volume level visual
 import { VoiceRecordingCursor } from "./VoiceRecordingCursor" // kilocode_change: STT recording cursor
+import { STTSetupPopover } from "./STTSetupPopover" // kilocode_change: STT setup help popover
 import { cn } from "@/lib/utils"
 import { usePromptHistory } from "./hooks/usePromptHistory"
 import { useSTT } from "@/hooks/useSTT" // kilocode_change: STT hook
@@ -162,8 +163,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			ghostServiceSettings, // kilocode_change
 			language, // User's VSCode display language
 			experiments, // kilocode_change: For speechToText experiment flag
-			speechToTextStatus, // kilocode_change: Speech-to-text availability status with failure reason
 		} = useExtensionState()
+
+		// kilocode_change: Local state for speech-to-text availability (fetched on-demand)
+		const [speechToTextStatus, setSpeechToTextStatus] = useState<
+			| {
+					available: boolean
+					reason?: "openaiKeyMissing" | "ffmpegNotInstalled"
+			  }
+			| undefined
+		>(undefined)
 
 		// kilocode_change start - autocomplete profile type system
 		// Filter out autocomplete profiles - only show chat profiles in the chat interface
@@ -458,13 +467,31 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setImageWarning(null)
 		}, [setImageWarning])
 
+		// kilocode_change start: Popover state for STT setup help
+		const [sttSetupPopoverOpen, setSttSetupPopoverOpen] = useState(false)
 		const handleMicrophoneClick = useCallback(() => {
+			// If STT is unavailable, open setup popover instead of starting recording
+			if (!speechToTextStatus?.available) {
+				setSttSetupPopoverOpen(true)
+				return
+			}
+
 			if (isRecording) {
 				stopSTT()
 			} else {
 				startSTT(language || "en") // Pass user's language from extension state
 			}
-		}, [isRecording, startSTT, stopSTT, language])
+		}, [isRecording, startSTT, stopSTT, language, speechToTextStatus?.available])
+		// kilocode_change end: Popover state for STT setup help
+		// kilocode_change: FFmpeg help - send message to chat
+		const handleFfmpegHelpClick = useCallback(() => {
+			const helpMessage = t("kilocode:speechToText.setupPopover.ffmpegMessage")
+			setInputValue(helpMessage)
+
+			setTimeout(() => {
+				onSend()
+			}) // Trigger send after a brief delay to ensure input is set
+		}, [t, setInputValue, onSend])
 
 		// kilocode_change start: Auto-clear images when model changes to non-image-supporting
 		const prevShouldDisableImages = useRef<boolean>(shouldDisableImages)
@@ -1326,6 +1353,22 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		})
 
+		// kilocode_change start: STT status message handler
+
+		// kilocode_change: Request STT availability check on mount (only once)
+		useEffect(() => {
+			if (experiments?.speechToText) {
+				vscode.postMessage({ type: "stt:checkAvailability" })
+			}
+		}, [experiments?.speechToText])
+		useEvent("message", (event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
+			if (message.type === "stt:statusResponse" && message.speechToTextStatus) {
+				setSpeechToTextStatus(message.speechToTextStatus)
+			}
+		})
+		// kilocode_change end: STT status message handler
+
 		const placeholderBottomText = `\n(${t("chat:addContext")}${shouldDisableImages ? `, ${t("chat:dragFiles")}` : `, ${t("chat:dragFilesImages")}`})`
 
 		// Common mode selector handler
@@ -1709,20 +1752,17 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 					{/* kilocode_change start: Show microphone button only if experiment enabled */}
 					{experiments?.speechToText && (
-						<MicrophoneButton
-							isRecording={isRecording}
-							onClick={handleMicrophoneClick}
-							disabled={!speechToTextStatus?.available}
-							tooltipContent={
-								!speechToTextStatus?.available && speechToTextStatus
-									? speechToTextStatus.reason === "openaiKeyMissing"
-										? t("kilocode:speechToText.unavailableOpenAiKeyMissing")
-										: speechToTextStatus.reason === "ffmpegNotInstalled"
-											? t("kilocode:speechToText.unavailableFfmpegNotInstalled")
-											: t("kilocode:speechToText.unavailableBoth")
-									: undefined
-							}
-						/>
+						<STTSetupPopover
+							speechToTextStatus={speechToTextStatus}
+							open={sttSetupPopoverOpen}
+							onOpenChange={setSttSetupPopoverOpen}
+							onFfmpegHelpClick={handleFfmpegHelpClick}>
+							<MicrophoneButton
+								isRecording={isRecording}
+								onClick={handleMicrophoneClick}
+								disabled={!speechToTextStatus?.available}
+							/>
+						</STTSetupPopover>
 					)}
 					{/* kilocode_change end */}
 
