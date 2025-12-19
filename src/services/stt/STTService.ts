@@ -406,46 +406,13 @@ export class STTService {
 	}
 
 	private async cleanupOnError(): Promise<void> {
-		// Ensure isActive is false to prevent any new processing
 		this.isActive = false
 
-		// Build cleanup tasks defensively - handle partially initialized services
-		const cleanupTasks: Promise<void>[] = []
-
-		// Stop audio capture if it exists and might be running
-		if (this.audioCapture) {
-			cleanupTasks.push(
-				this.audioCapture.stop().catch((error) => {
-					console.error("🎙️ [STTService] Error stopping audio capture during cleanup:", error)
-					// Don't rethrow - we want cleanup to continue
-				}),
-			)
-		}
-
-		// Disconnect transcription client if it exists
-		if (this.transcriptionClient) {
-			cleanupTasks.push(
-				this.transcriptionClient.disconnect().catch((error) => {
-					console.error("🎙️ [STTService] Error disconnecting transcription client during cleanup:", error)
-					// Don't rethrow - we want cleanup to continue
-				}),
-			)
-		}
-
-		// Wait for all cleanup tasks to complete (or fail gracefully)
-		if (cleanupTasks.length > 0) {
-			const cleanupResults = await Promise.allSettled(cleanupTasks)
-
-			// Log cleanup results for debugging
-			cleanupResults.forEach((result, index) => {
-				const name = index === 0 ? "audioCapture" : "transcriptionClient"
-				if (result.status === "rejected") {
-					console.error(`🎙️ [STTService] Failed to cleanup ${name}:`, result.reason)
-				} else {
-					console.log(`🎙️ [STTService] ${name} cleaned up successfully`)
-				}
-			})
-		}
+		await Promise.allSettled(
+			[this.audioCapture?.stop().catch(() => {}), this.transcriptionClient?.disconnect().catch(() => {})].filter(
+				Boolean,
+			),
+		)
 
 		this.resetSession()
 	}

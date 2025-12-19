@@ -165,7 +165,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			experiments, // kilocode_change: For speechToText experiment flag
 		} = useExtensionState()
 
-		// kilocode_change: Local state for speech-to-text availability (fetched on-demand)
+		// kilocode_change: Local state for speech-to-text availability (managed by MicrophoneButton)
 		const [speechToTextStatus, setSpeechToTextStatus] = useState<
 			| {
 					available: boolean
@@ -1348,22 +1348,6 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		})
 
-		// kilocode_change start: STT status message handler
-
-		// kilocode_change: Request STT availability check on mount (only once)
-		useEffect(() => {
-			if (experiments?.speechToText) {
-				vscode.postMessage({ type: "stt:checkAvailability" })
-			}
-		}, [experiments?.speechToText])
-		useEvent("message", (event: MessageEvent) => {
-			const message: ExtensionMessage = event.data
-			if (message.type === "stt:statusResponse" && message.speechToTextStatus) {
-				setSpeechToTextStatus(message.speechToTextStatus)
-			}
-		})
-		// kilocode_change end: STT status message handler
-
 		const placeholderBottomText = `\n(${t("chat:addContext")}${shouldDisableImages ? `, ${t("chat:dragFiles")}` : `, ${t("chat:dragFilesImages")}`})`
 
 		// Common mode selector handler
@@ -1758,6 +1742,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								isRecording={isRecording}
 								onClick={handleMicrophoneClick}
 								disabled={!speechToTextStatus?.available}
+								onStatusChange={setSpeechToTextStatus}
 							/>
 						</STTSetupPopover>
 					)}

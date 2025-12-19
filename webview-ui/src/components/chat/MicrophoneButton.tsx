@@ -1,15 +1,26 @@
 // kilocode_change - new file: Microphone button component for speech-to-text recording
-import React from "react"
+import React, { useEffect, useCallback } from "react"
 import { Mic, Square } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { StandardTooltip } from "@/components/ui"
 import { cn } from "@/lib/utils"
+import { vscode } from "@/utils/vscode"
+import { useEvent } from "react-use"
+import type { ExtensionMessage } from "@roo/ExtensionMessage"
 
 interface MicrophoneButtonProps {
 	isRecording: boolean
 	onClick: () => void
 	containerWidth?: number
 	disabled?: boolean // Visual disabled state only - button is always clickable
+	onStatusChange?: (
+		status:
+			| {
+					available: boolean
+					reason?: "openaiKeyMissing" | "ffmpegNotInstalled"
+			  }
+			| undefined,
+	) => void
 }
 
 export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
@@ -17,8 +28,32 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 	onClick,
 	containerWidth,
 	disabled = false,
+	onStatusChange,
 }) => {
 	const { t } = useTranslation()
+
+	// kilocode_change: Check STT availability
+	const checkAvailability = useCallback(() => {
+		vscode.postMessage({ type: "stt:checkAvailability" })
+	}, [])
+
+	// kilocode_change: Check availability on mount
+	useEffect(() => {
+		checkAvailability()
+	}, [checkAvailability])
+
+	// kilocode_change: Listen for status response
+	useEvent("message", (event: MessageEvent) => {
+		const message: ExtensionMessage = event.data
+		if (message.type === "stt:statusResponse" && message.speechToTextStatus) {
+			onStatusChange?.(message.speechToTextStatus)
+		}
+	})
+
+	// kilocode_change: Check availability on hover
+	const handleMouseEnter = useCallback(() => {
+		checkAvailability()
+	}, [checkAvailability])
 
 	const defaultTooltip = isRecording
 		? t("kilocode:speechToText.stopRecording")
@@ -31,6 +66,7 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 					isRecording ? t("kilocode:speechToText.stopRecording") : t("kilocode:speechToText.startRecording")
 				}
 				onClick={onClick}
+				onMouseEnter={handleMouseEnter}
 				className={cn(
 					"relative inline-flex items-center justify-center",
 					"bg-transparent border-none p-1.5",
