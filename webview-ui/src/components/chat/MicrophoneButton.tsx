@@ -32,28 +32,20 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 }) => {
 	const { t } = useTranslation()
 
-	// kilocode_change: Check STT availability
 	const checkAvailability = useCallback(() => {
 		vscode.postMessage({ type: "stt:checkAvailability" })
 	}, [])
 
-	// kilocode_change: Check availability on mount
 	useEffect(() => {
-		checkAvailability()
+		checkAvailability() // Check availability on mount
 	}, [checkAvailability])
 
-	// kilocode_change: Listen for status response
 	useEvent("message", (event: MessageEvent) => {
 		const message: ExtensionMessage = event.data
 		if (message.type === "stt:statusResponse" && message.speechToTextStatus) {
 			onStatusChange?.(message.speechToTextStatus)
 		}
 	})
-
-	// kilocode_change: Check availability on hover
-	const handleMouseEnter = useCallback(() => {
-		checkAvailability()
-	}, [checkAvailability])
 
 	const defaultTooltip = isRecording
 		? t("kilocode:speechToText.stopRecording")
@@ -66,7 +58,7 @@ export const MicrophoneButton: React.FC<MicrophoneButtonProps> = ({
 					isRecording ? t("kilocode:speechToText.stopRecording") : t("kilocode:speechToText.startRecording")
 				}
 				onClick={onClick}
-				onMouseEnter={handleMouseEnter}
+				onMouseEnter={checkAvailability}
 				className={cn(
 					"relative inline-flex items-center justify-center",
 					"bg-transparent border-none p-1.5",

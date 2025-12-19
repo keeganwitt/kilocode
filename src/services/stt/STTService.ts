@@ -91,20 +91,10 @@ export class STTService {
 
 			this.emitter.onStarted(this.sessionId)
 		} catch (error) {
-			// Immediately stop any processing
 			this.isActive = false
-
 			const errorMessage = error instanceof Error ? error.message : "Failed to start"
-			// Preserve sessionId for error message so frontend can match the session
-			const errorSessionId = this.sessionId
-
-			// Send error to frontend before cleanup
 			this.emitter.onStopped("error", undefined, errorMessage)
-
-			// Cleanup resources
 			await this.cleanupOnError()
-
-			// Clear sessionId after error is sent
 			this.sessionId = null
 			throw error
 		}
